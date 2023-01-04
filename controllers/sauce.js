@@ -43,6 +43,8 @@ exports.OneSauce = (req, res, next) => {
 };
 
 
+
+
 //Modification d'une sauce
 exports.update = (req, res, next) => {
   const sauceObject = req.file ?
@@ -50,15 +52,16 @@ exports.update = (req, res, next) => {
       ...JSON.parse(req.body.sauce),
       imageUrl: `${req.protocol}://${req.get('host')}/images/${req.file.filename}`
     } : { ...req.body };
-  if (req.file) {
+  if (req.file)  {
     Sauce.findOne({ _id: req.params.id })
       .then((sauce) => {
+        if (sauce.userId != req.auth.userId) {
         const filename = sauce.imageUrl.split('/images/')[1];
         fs.unlink(`images/${filename}`, () => {
           Sauce.updateOne({ _id: req.params.id }, { ...sauceObject, _id: req.params.id })
             .then(() => { res.status(200).json({ message: 'Sauce mise à jour!' }); })
             .catch((error) => { res.status(400).json({ error }); });
-        })
+        })}
       })
       .catch((error) => { res.status(500).json({ error }); });
 
@@ -85,21 +88,30 @@ exports.list = (req, res, next) => {
   );
 };
 
-//Supprimer une sauce
+
+/*** PERMET LA SUPPRESSION DE "SAUCE" */
 exports.deleteSauce = (req, res, next) => {
-    Sauce.findOne({ _id: req.params.id})
-        .then(sauce => {
-                const filename = sauce.imageUrl.split('/images/')[1];
-                fs.unlink(`images/${filename}`, () => {
-                    Sauce.deleteOne({_id: req.params.id})
-                        .then(() => { res.status(200).json({message: 'Objet supprimé !'})})
-                        .catch(error => res.status(401).json({ error }));
-                });
-            })
-        .catch( error => {
-            res.status(500).json({ error });
+  // Avant de supprimer l'objet, on va le chercher pour obtenir l'url de l'image et supprimer le fichier image de la base
+  Sauce.findOne({ _id: req.params.id })
+    .then((sauce) => {
+      if (sauce.userId != req.auth.userId) {
+        res.status(403).json({
+          message: 'Action non autorisée',
         });
-      };
+        return;
+      }
+      // Pour extraire ce fichier, on récupère l'url de la sauce, et on le split autour de la chaine de caractères, donc le nom du fichier
+      const filename = sauce.imageUrl.split('/images/')[1];
+      // Avec ce nom de fichier, on appelle unlink pour suppr le fichier
+      fs.unlink(`images/${filename}`, () => {
+        // On supprime le document correspondant dans la base de données
+        Sauce.deleteOne({ _id: req.params.id })
+          .then(() => res.status(200).json({ message: 'Sauce supprimée !' }))
+          .catch((error) => res.status(400).json({ error }));
+      });
+    })
+    .catch((error) => res.status(500).json({ error }));
+};
 
       //Like sauce
 exports.likeSauce = (req, res, next) => {
@@ -127,10 +139,11 @@ exports.likeSauce = (req, res, next) => {
             })
               .then(() => { res.status(201).json({ message: 'Ton avis a été pris en compte!' }); })
               .catch((error) => { res.status(400).json({ error: error }); });
-          }
+          } 
         })
-        .catch((error) => { res.status(404).json({ error: error }); });
+
       break;
+      
     //likes = 1
     //uptade the sauce, send message/error
     case 1:
@@ -139,22 +152,34 @@ exports.likeSauce = (req, res, next) => {
         $push: { usersLiked: req.body.userId },
         _id: req.params.id
       })
-        .then(() => { res.status(201).json({ message: 'Ton like a été pris en compte!' }); })
-        .catch((error) => { res.status(400).json({ error: error }); });
+      
+        .then((sauce) => {
+                    if (Sauce.usersLiked.find(user => user === req.auth.userId)) 
+           res.status(201).json({ message: 'Ton like a été pris en compte!' }); })
+        .catch((error) => { res.status(400).json({ error: error }); })
+        {
       break;
+  };
+
+
     //likes = -1
     //uptade the sauce, send message/error
     case -1:
       Sauce.updateOne({ _id: req.params.id }, {
         $inc: { dislikes: 1 },
-        $push: { usersDisliked: req.body.userId },
+        $push: { usersDisliked: req.auth.userId },
         _id: req.params.id
       })
-        .then(() => { res.status(201).json({ message: 'Ton dislike a été pris en compte!' }); })
+      
+        .then(() => {
+          if (Sauce.usersLiked.find(user => user === req.auth.userId))
+           res.status(201).json({ message: 'Ton dislike a été pris en compte!' }); })
         .catch((error) => { res.status(400).json({ error: error }); });
       break;
+
     default:
       console.error('not today : mauvaise requête');
   }
 
 };
+
